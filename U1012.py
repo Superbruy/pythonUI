@@ -37,6 +37,66 @@ vallist = []
 unit_list = {}  # ‘2711’：[pa, m...]
 unit_con = []  # 对应contents
 unit_con2 = []  # 对应vallist
+heartbeat_time = []
+connect = False  #是否连接的状态
+lasttime = ()    #上次接受的心跳包的时间
+
+def heart_loop():
+    heartbeat()
+    detect_heartbeat()
+    root.after(2000,heart_loop)
+
+def detect_heartbeat():
+    global heartbeat_time, connect, lasttime
+    nowtime = time.localtime(time.time())
+    pretime = heartbeat_time[0]
+    pretime_num = datetime.datetime(pretime[0], pretime[1], pretime[2], pretime[3], pretime[4], pretime[5])
+    nowtime_num = datetime.datetime(nowtime[0], nowtime[1], nowtime[2], nowtime[3], nowtime[4], nowtime[5])
+    timedif = (nowtime_num - pretime_num).total_seconds()
+    nowtime_str = time.strftime("%Y-%m-%d %H:%M:%S", nowtime)
+    pretime_str = time.strftime("%Y-%m-%d %H:%M:%S", pretime)
+    if connect == False and timedif < 70 and pretime != lasttime:
+        connect = True
+        hb_treeview.insert('','end', values=('连接',nowtime_str, pretime_str))
+        mh_connect.configure(text='心跳包正常接收中')
+        lasttime = pretime
+    elif connect == True and timedif > 62 :
+        hb_treeview.insert('', 'end', values=('断开',nowtime_str, pretime_str))
+        connect = False
+        lasttime = pretime
+        mh_connect.configure(text='连接已断开')
+
+def heartbeat():
+    global heartbeat_time, connect
+    sstr = "TCPServer"
+    heart_file_list = glob.glob("./{}/log/heartbeat*".format(sstr))
+    sort_heart = sorted(heart_file_list, key=lambda x: os.path.getmtime(x))  # Sort by time of most recent modification
+    latest_heart_path = sort_heart[-1]  # list member: path
+    #temp_list = get_latest_lines(latest_heart_path)
+    c = []
+    try:
+        with open(latest_heart_path) as f:
+            for line in f:
+                if line.startswith("20"):
+                    line = line.rstrip("\n")
+                    c.append(line)
+            need = c[-1]
+            pre, mid, rear = need.split('\t')
+            hadtime = time.strptime(pre, "%Y-%m-%d %H:%M:%S")
+            nowtime = time.localtime(time.time())
+            if len(heartbeat_time) == 0 or heartbeat_time[0] != hadtime:
+                heartbeat_time = [hadtime, nowtime]
+            # hadtime = datetime.datetime(hadtime[0], hadtime[1], hadtime[2], hadtime[3], hadtime[4], hadtime[5])
+            # nowtime = datetime.datetime(nowtime[0], nowtime[1], nowtime[2], nowtime[3], nowtime[4], nowtime[5])
+            # timedif = (nowtime - hadtime).seconds
+            # if timedif > 120:
+            #     connect = False
+            # else:
+            #     connect = True
+    except EXCEPTION:
+        print("read file error\n")
+
+
 
 
 def update_cmblist():  # 更新下拉菜单机器号
@@ -544,5 +604,38 @@ for mm in range(1, 10):
     locals()["tree" + str(mm)].pack()
 
 page_note.grid(row=0, column=1, padx=2)
+
+mh = tkinter.Frame()
+major_note.add(mh, text="断网报警")
+
+mh_subTopF = Frame(mh, relief=SUNKEN)  # 宽度， 边框样式
+mh_subTopF.place(x=0, y=0, width=1100, height=50)
+mh_subBotF = Frame(mh)
+mh_subBotF.place(x=0, y=50, width=1100, height=800)
+mh_label = tkinter.Label(mh_subTopF, text='心跳断连报警记录', bg='lightblue', fg='red', font=("Arial Bold", 20))
+mh_label.place(x=200, y=5)
+mh_connect = tkinter.Label(mh_subTopF, text='连接断开中', fg='green', font=("Arial Bold", 20))
+mh_connect.place(x=700, y=5)
+
+
+columns = ("类型", "发生时间", "最近心跳时间")
+hb_treeview = ttk.Treeview(mh_subBotF, height=18, show="headings", columns=columns)  # 表格
+
+hb_treeview.column("类型", width=200, anchor='center')  # 表示列,不显示
+hb_treeview.column("发生时间", width=500, anchor='center')  # 表示列,不显示
+hb_treeview.column("最近心跳时间", width=500, anchor='center')
+
+hb_treeview.heading("类型", text="类型")
+hb_treeview.heading("发生时间", text="发生时间")  # 显示表头
+hb_treeview.heading("最近心跳时间", text="最近心跳时间")
+
+hb_treeview.pack(fill=BOTH)
+
+heart_loop()
+
+
+
+
+
 
 mainloop()
