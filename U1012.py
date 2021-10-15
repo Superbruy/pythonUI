@@ -10,6 +10,8 @@ import os, glob
 import time
 import datetime
 import psutil
+from tkinter.messagebox import *
+from tkinter.filedialog import askdirectory
 
 root = Tk()
 root.title('传感器信息显示')  # 窗口名字
@@ -40,6 +42,16 @@ unit_con2 = []  # 对应vallist
 heartbeat_time = []
 connect = False  #是否连接的状态
 lasttime = ()    #上次接受的心跳包的时间
+directory_address = ''
+directory_address_show = StringVar()
+
+def choose_directory():
+    global directory_address
+    directory_address = tkinter.filedialog.askdirectory()
+    directory_address = directory_address.replace("/", "\\")
+    directory_address_show.set(directory_address)
+    get_realtime_data(10)
+    update_cmblist()
 
 def heart_loop():
     heartbeat()
@@ -48,6 +60,8 @@ def heart_loop():
 
 def detect_heartbeat():
     global heartbeat_time, connect, lasttime
+    if directory_address=='':
+        return
     nowtime = time.localtime(time.time())
     pretime = heartbeat_time[0]
     pretime_num = datetime.datetime(pretime[0], pretime[1], pretime[2], pretime[3], pretime[4], pretime[5])
@@ -57,7 +71,8 @@ def detect_heartbeat():
     pretime_str = time.strftime("%Y-%m-%d %H:%M:%S", pretime)
     if connect == False and timedif < 70 and pretime != lasttime:
         connect = True
-        hb_treeview.insert('','end', values=('连接',nowtime_str, pretime_str))
+        if lasttime !=():
+            hb_treeview.insert('','end', values=('连接',nowtime_str, pretime_str))
         mh_connect.configure(text='心跳包正常接收中')
         lasttime = pretime
     elif connect == True and timedif > 62 :
@@ -68,8 +83,14 @@ def detect_heartbeat():
 
 def heartbeat():
     global heartbeat_time, connect
-    sstr = "TCPServer"
-    heart_file_list = glob.glob("./{}/log/heartbeat*".format(sstr))
+    #sstr = "TCPServer"
+    #heart_file_list = glob.glob("./{}/log/heartbeat*".format(sstr))
+    if directory_address == '':
+        return
+    if directory_address.endswith('TCPServer'):
+        heart_file_list = glob.glob("{}/log/heartbeat*".format(directory_address))
+    elif directory_address.endswith('log'):
+        heart_file_list = glob.glob("{}/heartbeat*".format(directory_address))
     sort_heart = sorted(heart_file_list, key=lambda x: os.path.getmtime(x))  # Sort by time of most recent modification
     latest_heart_path = sort_heart[-1]  # list member: path
     #temp_list = get_latest_lines(latest_heart_path)
@@ -136,10 +157,31 @@ def change_show():
 
 
 def get_realtime_data(num):  # 读取最近的num个文件的数据并更新全局字典
-    global file_num, contents_list
+    global file_num, contents_list, directory_address
     # 得到最后一个文件的最后一行
-    sstr = "TCPServer"
-    dd_file_list = glob.glob("./{}/log/DeviceData*".format(sstr))
+    #sstr = "TCPServer"
+    #dd_file_list = glob.glob("./{}/log/DeviceData*".format(sstr))
+    '''
+    #可以选择TCPServer或者log都可
+    dd_file_list = []
+    for root, dirs, files in os.walk(directory_address):
+        if len(dirs)==0:
+            for filename in files:
+                if filename.startswith('DeviceData'):
+                    dd_file_list.append(os.path.join(root, filename))
+        else:
+            for dirname in dirs:
+                for filename in files:
+                    if filename.startswith('DeviceData'):
+                        dd_file_list.append(os.path.join(root, dirname, filename))
+    '''
+    # 必须选择log文件夹或TCPServer文件夹
+    if directory_address.endswith('log'):
+        dd_file_list = glob.glob("{}/DeviceData*".format(directory_address))
+    elif directory_address.endswith('TCPServer'):
+        dd_file_list = glob.glob("{}/log/DeviceData*".format(directory_address))
+    else:
+        showinfo('警告', '文件夹选择错误，请选择正确文件夹')
     sort_dd = sorted(dd_file_list, key=lambda x: os.path.getmtime(x))  # Sort by time of most recent modification
     latest_dd_path = sort_dd[-num:]  # list member: path
     get_latest_lines(latest_dd_path)
@@ -236,9 +278,13 @@ def alarm_logic():
     cur_str_l = "DeviceAlarm_2021" + last_month + date + "_"  # 上月记录
 
     # print(cur_str)
-    path_list = glob.glob("./TCPServer/log/DeviceAlarm*")
+    #path_list = glob.glob("./TCPServer/log/DeviceAlarm*")
+    if directory_address.endswith('log'):
+        path_list = glob.glob("{}/DeviceAlarm*".format(directory_address))
+    elif directory_address.endswith('TCPServer'):
+        path_list = glob.glob("{}/log/DeviceAlarm*".format(directory_address))
     for item in path_list:
-        r.append(item.split("\\")[1])
+        r.append(item.split("\\")[-1])
     for path in r:
         if cur_str_l <= path <= cur_str_r:
             sel.append(path)
@@ -247,7 +293,10 @@ def alarm_logic():
     alarm_record = []
     alarm_parameter_address_list = [19, 24, 29, 49, 53, 55, 57]
     for file in sel:
-        path1 = "./TCPServer/log/" + file
+        if directory_address.endswith('log'):
+            path1 = os.path.join(directory_address, file)
+        elif directory_address.endswith('TCPServer'):
+            path1 = os.path.join(directory_address, 'log', file)
         with open(path1) as f:
             for line in f:
                 line = line.strip('\n')
@@ -420,8 +469,15 @@ topFrame = Frame(root, bg="orange", relief=SUNKEN)
 topFrame.place(x=0, y=0, width=1100, height=60)
 
 # topFrame在root中，topFrame中有 请在下方选择机器号,实时数据,实时时间
-label = Label(topFrame, text="请在下方选择机器号", font=("Arial Bold", 20))
-label.place(x=10, y=10)
+#label = Label(topFrame, text="请在下方选择机器号", font=("Arial Bold", 20))
+#label.place(x=10, y=10)
+label_choosefile = Label(topFrame, text='目标路径')
+label_choosefile.place(x=5, y=10)
+entry_choosefile = Entry(topFrame, textvariable=directory_address_show, state="readonly")
+entry_choosefile.place(x=60, y=12, width=300)
+b2 = Button(topFrame, text='选择文件夹', command=choose_directory)
+#b2.bind("<Button-1>", choose_directory)
+b2.place(x=365, y=8)
 
 b1 = Button(topFrame, text="实时数据", font=("Arial Bold", 20))
 b1.place(x=450, y=5)
@@ -535,11 +591,11 @@ cmb = ttk.Combobox(subTopF)
 cmb['value'] = ['选择机器ID']
 cmb.current(0)
 cmb.place(x=5, y=5)
-get_realtime_data(10)
-cmb_value = []  # 下拉框所有选项
-for ckey in sorted(contents_list):
-    cmb_value.append(ckey)
-cmb['value'] = cmb_value
+# get_realtime_data(10)
+# cmb_value = []  # 下拉框所有选项
+# for ckey in sorted(contents_list):
+#     cmb_value.append(ckey)
+# cmb['value'] = cmb_value
 cmb.bind('<<ComboboxSelected>>', choose_machine)
 page_note.add(m11, text="页面1")
 page_note.add(m12, text="页面2")
