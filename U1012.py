@@ -42,22 +42,59 @@ unit_con2 = []  # 对应vallist
 heartbeat_time = []
 connect = False  #是否连接的状态
 lasttime = ()    #上次接受的心跳包的时间
-directory_address = ''
+directory_address = '' #选择文件夹的全局变量
 directory_address_show = StringVar()
 
+#选择文件夹按钮的执行函数，将文件夹路径存入到全局变量中，并显示在框内
 def choose_directory():
     global directory_address
     directory_address = tkinter.filedialog.askdirectory()
     directory_address = directory_address.replace("/", "\\")
     directory_address_show.set(directory_address)
+    if directory_address.endswith('log'):
+        pass
+    elif directory_address.endswith('TCPServer'):
+        directory_address += '/log'
+    else:
+        showinfo('警告', '文件夹选择错误，请选择正确文件夹')
     get_realtime_data(10)
     update_cmblist()
 
+'''
+心跳报警部分
+'''
+#心跳报警循环函数
 def heart_loop():
     heartbeat()
     detect_heartbeat()
     root.after(2000,heart_loop)
 
+#心跳信息读取
+def heartbeat():
+    global heartbeat_time, connect
+    if directory_address == '':
+        return
+    heart_file_list = glob.glob("{}/heartbeat*".format(directory_address))
+    sort_heart = sorted(heart_file_list, key=lambda x: os.path.getmtime(x))  # Sort by time of most recent modification
+    latest_heart_path = sort_heart[-1]  # list member: path
+    c = []
+    try:
+        with open(latest_heart_path) as f:
+            for line in f:
+                if line.startswith("20"):
+                    line = line.rstrip("\n")
+                    c.append(line)
+            need = c[-1]
+            pre, mid, rear = need.split('\t')
+            hadtime = time.strptime(pre, "%Y-%m-%d %H:%M:%S")
+            nowtime = time.localtime(time.time())
+            if len(heartbeat_time) == 0 or heartbeat_time[0] != hadtime:
+                heartbeat_time = [hadtime, nowtime]
+    except EXCEPTION:
+        print("read file error\n")
+
+
+#心跳信号判断
 def detect_heartbeat():
     global heartbeat_time, connect, lasttime
     if directory_address=='':
@@ -81,124 +118,26 @@ def detect_heartbeat():
         lasttime = pretime
         mh_connect.configure(text='连接已断开')
 
-def heartbeat():
-    global heartbeat_time, connect
-    #sstr = "TCPServer"
-    #heart_file_list = glob.glob("./{}/log/heartbeat*".format(sstr))
-    if directory_address == '':
-        return
-    if directory_address.endswith('TCPServer'):
-        heart_file_list = glob.glob("{}/log/heartbeat*".format(directory_address))
-    elif directory_address.endswith('log'):
-        heart_file_list = glob.glob("{}/heartbeat*".format(directory_address))
-    sort_heart = sorted(heart_file_list, key=lambda x: os.path.getmtime(x))  # Sort by time of most recent modification
-    latest_heart_path = sort_heart[-1]  # list member: path
-    #temp_list = get_latest_lines(latest_heart_path)
-    c = []
-    try:
-        with open(latest_heart_path) as f:
-            for line in f:
-                if line.startswith("20"):
-                    line = line.rstrip("\n")
-                    c.append(line)
-            need = c[-1]
-            pre, mid, rear = need.split('\t')
-            hadtime = time.strptime(pre, "%Y-%m-%d %H:%M:%S")
-            nowtime = time.localtime(time.time())
-            if len(heartbeat_time) == 0 or heartbeat_time[0] != hadtime:
-                heartbeat_time = [hadtime, nowtime]
-            # hadtime = datetime.datetime(hadtime[0], hadtime[1], hadtime[2], hadtime[3], hadtime[4], hadtime[5])
-            # nowtime = datetime.datetime(nowtime[0], nowtime[1], nowtime[2], nowtime[3], nowtime[4], nowtime[5])
-            # timedif = (nowtime - hadtime).seconds
-            # if timedif > 120:
-            #     connect = False
-            # else:
-            #     connect = True
-    except EXCEPTION:
-        print("read file error\n")
 
 
+'''
+传感器参数显示部分，包括下拉菜单机器号选择
+'''
 
-
-def update_cmblist():  # 更新下拉菜单机器号
-    cmb_value = []
-    for ckey in sorted(contents_list):
-        cmb_value.append(ckey)
-    cmb['value'] = cmb_value
-
-
-def update_contents():  # 更新参数
-    global contents, contents_list, machine_ID, unit_list, unit_con
-    contents = contents_list[machine_ID]
-    unit_con = unit_list[machine_ID]
-    change_show()
-
-
-def choose_machine(event):  # 下拉菜单事件绑定
-    global contents_list, contents, machine_ID, unit_list, unit_con
-    # if cmb.get() != '选择机器ID':
-    machine_ID = cmb.get()
-    contents = contents_list[machine_ID]
-    unit_con = unit_list[machine_ID]
-    change_show()
-    loop()
-
-
-def change_show():
-    global contents, vallist, unit_con, unit_con2
-    i = 0
-    j = 0
-    for con in contents:
-        vallist[i].configure(text=con)
-        i = i + 1
-    for noc in unit_con:
-        unit_con2[j].configure(text=noc)
-        j = j + 1
-
+#显示参数部分循环函数
+def loop():
+    get_realtime_data(3)
+    update_contents()
+    update_cmblist()
+    root.after(10000, loop)
 
 def get_realtime_data(num):  # 读取最近的num个文件的数据并更新全局字典
     global file_num, contents_list, directory_address
-    # 得到最后一个文件的最后一行
-    #sstr = "TCPServer"
-    #dd_file_list = glob.glob("./{}/log/DeviceData*".format(sstr))
-    '''
-    #可以选择TCPServer或者log都可
-    dd_file_list = []
-    for root, dirs, files in os.walk(directory_address):
-        if len(dirs)==0:
-            for filename in files:
-                if filename.startswith('DeviceData'):
-                    dd_file_list.append(os.path.join(root, filename))
-        else:
-            for dirname in dirs:
-                for filename in files:
-                    if filename.startswith('DeviceData'):
-                        dd_file_list.append(os.path.join(root, dirname, filename))
-    '''
     # 必须选择log文件夹或TCPServer文件夹
-    if directory_address.endswith('log'):
-        dd_file_list = glob.glob("{}/DeviceData*".format(directory_address))
-    elif directory_address.endswith('TCPServer'):
-        dd_file_list = glob.glob("{}/log/DeviceData*".format(directory_address))
-    else:
-        showinfo('警告', '文件夹选择错误，请选择正确文件夹')
+    dd_file_list = glob.glob("{}/DeviceData*".format(directory_address))
     sort_dd = sorted(dd_file_list, key=lambda x: os.path.getmtime(x))  # Sort by time of most recent modification
     latest_dd_path = sort_dd[-num:]  # list member: path
     get_latest_lines(latest_dd_path)
-
-
-def get_point(arr):
-    '''
-    字符串中第一个不是数字的字符的位置
-    :return:
-    '''
-    cou = 1
-    for chars in arr:
-        if chars in number_list:
-            cou += 1
-        else:
-            return cou-1
-
 
 def get_latest_lines(path_list):
     global contents_list, unit_list
@@ -234,7 +173,57 @@ def get_latest_lines(path_list):
         except EXCEPTION:
             print("read file error\n")
 
+def get_point(arr):
+    '''
+    字符串中第一个不是数字的字符的位置
+    :return:
+    '''
+    cou = 1
+    for chars in arr:
+        if chars in number_list:
+            cou += 1
+        else:
+            return cou-1
 
+def update_contents():  # 更新参数
+    global contents, contents_list, machine_ID, unit_list, unit_con
+    contents = contents_list[machine_ID]
+    unit_con = unit_list[machine_ID]
+    change_show()
+
+def update_cmblist():  # 更新下拉菜单机器号
+    cmb_value = []
+    for ckey in sorted(contents_list):
+        cmb_value.append(ckey)
+    cmb['value'] = cmb_value
+
+
+
+def choose_machine(event):  # 下拉菜单事件绑定
+    global contents_list, contents, machine_ID, unit_list, unit_con
+    # if cmb.get() != '选择机器ID':
+    machine_ID = cmb.get()
+    contents = contents_list[machine_ID]
+    unit_con = unit_list[machine_ID]
+    change_show()
+    loop()
+
+
+def change_show():
+    global contents, vallist, unit_con, unit_con2
+    i = 0
+    j = 0
+    for con in contents:
+        vallist[i].configure(text=con)
+        i = i + 1
+    for noc in unit_con:
+        unit_con2[j].configure(text=noc)
+        j = j + 1
+
+
+'''
+实时时间显示
+'''
 def gettime():
     # 获取当前时间并转为字符串
     timestr = time.strftime("%H:%M:%S")
@@ -243,6 +232,10 @@ def gettime():
     # 每隔一秒调用函数gettime自身获取时间
     root.after(1000, gettime)
 
+
+'''
+报警部分
+'''
 
 def alarm_loop():
     print(u'当前进程的内存使用：%.4f GB' % (psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024 / 1024))
@@ -276,13 +269,7 @@ def alarm_logic():
 
     cur_str_r = "DeviceAlarm_2021" + month + date + "_"  # 本月记录
     cur_str_l = "DeviceAlarm_2021" + last_month + date + "_"  # 上月记录
-
-    # print(cur_str)
-    #path_list = glob.glob("./TCPServer/log/DeviceAlarm*")
-    if directory_address.endswith('log'):
-        path_list = glob.glob("{}/DeviceAlarm*".format(directory_address))
-    elif directory_address.endswith('TCPServer'):
-        path_list = glob.glob("{}/log/DeviceAlarm*".format(directory_address))
+    path_list = glob.glob("{}/DeviceAlarm*".format(directory_address))
     for item in path_list:
         r.append(item.split("\\")[-1])
     for path in r:
@@ -350,133 +337,21 @@ def alarm_logic():
     alarm_loop()
 
 
-def get_last_line(path):
-    '''
-    得到最后一行的内容
-    :param path:
-    :return:
-    '''
-    c = []
-    try:
-        with open(path) as f:
-            for line in f:
-                if line.startswith("2021"):
-                    line = line.rstrip("\n")
-                    c.append(line)
-            need = c[-1]
-            pre, mid, rear = need.split('\t')
-            lists = rear.split('#')
-            for i, item in enumerate(lists):
-                if item.endswith("Pa"):
-                    lists[i] = item.rstrip("Pa")
-                elif item.endswith("m3/h"):
-                    lists[i] = item.rstrip("m3/h")
-                else:
-                    lists[i] = item.rstrip("m")
-            return lists
-    except EXCEPTION:
-        print("read file error\n")
-
-
-def loop():
-    get_realtime_data(3)
-    update_contents()
-    update_cmblist()
-    root.after(10000, loop)
-
-
-# 暂时不用
-def show():
-    global file_num, contents
-    # 得到最后一个文件的最后一行
-    sstr = "TCPServer"
-    dd_file_list = glob.glob("./{}/log/DeviceData*".format(sstr))
-    sort_dd = sorted(dd_file_list, key=lambda x: os.path.getmtime(x))  # Sort by time of most recent modification
-    latest_dd_path = sort_dd[-1]  # list member: path
-    temp = get_last_line(latest_dd_path)
-    contents = temp[1:]
-
-    # 以下四行测试在不同分页上是否显示正常
-    # label = tkinter.Label(m11, text='开始接收端口数据', bg='lightblue', fg='red')
-    # label.place(x=100, y=100)
-    # label = tkinter.Label(m12, text='ddd', bg='lightblue', fg='red')
-    # label.place(x=100, y=100)
-
-    # 在不同页面上显示所有的号码，一个页面显示35个
-    index_s = ["m3/h", "Pa", "m", "m"]
-    index_n = ["Pa"] * 126
-    index = index_s + index_n
-    num_list = [(str(n).zfill(3) + "#") for n in range(1, 131)]
-    # page 1
-    for i in range(row_num):
-        for j in range(column_num):
-            num1 = Label(m11, text=num_list[i * column_num + j], fg="green", bg="pink", font=("Arial Bold", 20))
-            num1.place(x=(num_width + x_pad) * j + 20, y=20 + (num_height + value_height) * i, width=num_width,
-                       height=num_height)
-            value1 = Label(m11, text=contents[i * column_num + j], fg="red", bg="yellow",
-                           font=("Arial Bold", 20))
-            value1.place(x=(num_width + x_pad) * j + 20, y=60 + (num_height + value_height) * i, width=value_width,
-                         height=value_height)
-            unit1 = Label(m11, text="{}".format(index[i * column_num + j]), font=("Arial Bold", 20))
-            unit1.place(x=value_width + (num_width + x_pad) * j + 20, y=60 + (num_height + value_height) * i,
-                        width=unit_width, height=unit_height)
-    # page 2
-    for i in range(row_num):
-        for j in range(column_num):
-            num1 = Label(m12, text=num_list[36 + i * column_num + j], fg="green", bg="pink", font=("Arial Bold", 20))
-            num1.place(x=(num_width + x_pad) * j + 20, y=20 + (num_height + value_height) * i, width=num_width,
-                       height=num_height)
-            value1 = Label(m12, text=contents[36 + i * column_num + j], fg="red", bg="yellow",
-                           font=("Arial Bold", 20))
-            value1.place(x=(num_width + x_pad) * j + 20, y=60 + (num_height + value_height) * i, width=value_width,
-                         height=value_height)
-            unit1 = Label(m12, text="{}".format(index[36 + i * column_num + j]), font=("Arial Bold", 20))
-            unit1.place(x=value_width + (num_width + x_pad) * j + 20, y=60 + (num_height + value_height) * i,
-                        width=unit_width, height=unit_height)
-    # page 3
-    for i in range(row_num):
-        for j in range(column_num):
-            num1 = Label(m13, text=num_list[72 + i * column_num + j], fg="green", bg="pink", font=("Arial Bold", 20))
-            num1.place(x=(num_width + x_pad) * j + 20, y=20 + (num_height + value_height) * i, width=num_width,
-                       height=num_height)
-            value1 = Label(m13, text=contents[72 + i * column_num + j], fg="red", bg="yellow",
-                           font=("Arial Bold", 20))
-            value1.place(x=(num_width + x_pad) * j + 20, y=60 + (num_height + value_height) * i, width=value_width,
-                         height=value_height)
-            unit1 = Label(m13, text="{}".format(index[72 + i * column_num + j]), font=("Arial Bold", 20))
-            unit1.place(x=value_width + (num_width + x_pad) * j + 20, y=60 + (num_height + value_height) * i,
-                        width=unit_width, height=unit_height)
-    # page 4
-    for i in range(row_num):
-        for j in range(column_num):
-            if (i * row_num + j) > 21:
-                break
-            num1 = Label(m14, text=num_list[108 + i * column_num + j], fg="green", bg="pink", font=("Arial Bold", 20))
-            num1.place(x=(num_width + x_pad) * j + 20, y=20 + (num_height + value_height) * i, width=num_width,
-                       height=num_height)
-            value1 = Label(m14, text=contents[108 + i * column_num + j], fg="red", bg="yellow",
-                           font=("Arial Bold", 20))
-            value1.place(x=(num_width + x_pad) * j + 20, y=60 + (num_height + value_height) * i, width=value_width,
-                         height=value_height)
-            unit1 = Label(m14, text="{}".format(index[108 + i * column_num + j]), font=("Arial Bold", 20))
-            unit1.place(x=value_width + (num_width + x_pad) * j + 20, y=60 + (num_height + value_height) * i,
-                        width=unit_width, height=unit_height)
-    loop()
-
+'''
+主体框架
+'''
 
 # topFrame
 topFrame = Frame(root, bg="orange", relief=SUNKEN)
 topFrame.place(x=0, y=0, width=1100, height=60)
 
 # topFrame在root中，topFrame中有 请在下方选择机器号,实时数据,实时时间
-#label = Label(topFrame, text="请在下方选择机器号", font=("Arial Bold", 20))
-#label.place(x=10, y=10)
+#选择文件夹及路径显示
 label_choosefile = Label(topFrame, text='目标路径')
 label_choosefile.place(x=5, y=10)
 entry_choosefile = Entry(topFrame, textvariable=directory_address_show, state="readonly")
 entry_choosefile.place(x=60, y=12, width=300)
 b2 = Button(topFrame, text='选择文件夹', command=choose_directory)
-#b2.bind("<Button-1>", choose_directory)
 b2.place(x=365, y=8)
 
 b1 = Button(topFrame, text="实时数据", font=("Arial Bold", 20))
@@ -591,11 +466,6 @@ cmb = ttk.Combobox(subTopF)
 cmb['value'] = ['选择机器ID']
 cmb.current(0)
 cmb.place(x=5, y=5)
-# get_realtime_data(10)
-# cmb_value = []  # 下拉框所有选项
-# for ckey in sorted(contents_list):
-#     cmb_value.append(ckey)
-# cmb['value'] = cmb_value
 cmb.bind('<<ComboboxSelected>>', choose_machine)
 page_note.add(m11, text="页面1")
 page_note.add(m12, text="页面2")
@@ -661,6 +531,7 @@ for mm in range(1, 10):
 
 page_note.grid(row=0, column=1, padx=2)
 
+#断网报警页
 mh = tkinter.Frame()
 major_note.add(mh, text="断网报警")
 
