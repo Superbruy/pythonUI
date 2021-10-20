@@ -12,6 +12,8 @@ import datetime
 import psutil
 from tkinter.messagebox import *
 from tkinter.filedialog import askdirectory
+import sqlite3
+import json
 
 root = Tk()
 root.title('传感器信息显示')  # 窗口名字
@@ -40,12 +42,15 @@ unit_list = {}  # ‘2711’：[pa, m...]
 unit_con = []  # 对应contents
 unit_con2 = []  # 对应vallist
 heartbeat_time = []
-connect = False  #是否连接的状态
-lasttime = ()    #上次接受的心跳包的时间
-directory_address = '' #选择文件夹的全局变量
+connect = False  # 是否连接的状态
+lasttime = ()  # 上次接受的心跳包的时间
+directory_address = ''  # 选择文件夹的全局变量
 directory_address_show = StringVar()
+total_lines = 0  # 用于统计devicedata中数据有无变化
+sensor_dict = {}
 
-#选择文件夹按钮的执行函数，将文件夹路径存入到全局变量中，并显示在框内
+
+# 选择文件夹按钮的执行函数，将文件夹路径存入到全局变量中，并显示在框内
 def choose_directory():
     global directory_address
     directory_address = tkinter.filedialog.askdirectory()
@@ -60,16 +65,20 @@ def choose_directory():
     get_realtime_data(10)
     update_cmblist()
 
+
 '''
 心跳报警部分
 '''
-#心跳报警循环函数
+
+
+# 心跳报警循环函数
 def heart_loop():
     heartbeat()
     detect_heartbeat()
-    root.after(2000,heart_loop)
+    root.after(2000, heart_loop)
 
-#心跳信息读取
+
+# 心跳信息读取
 def heartbeat():
     global heartbeat_time, connect
     if directory_address == '':
@@ -94,10 +103,10 @@ def heartbeat():
         print("read file error\n")
 
 
-#心跳信号判断
+# 心跳信号判断
 def detect_heartbeat():
     global heartbeat_time, connect, lasttime
-    if directory_address=='':
+    if directory_address == '':
         return
     nowtime = time.localtime(time.time())
     pretime = heartbeat_time[0]
@@ -108,28 +117,65 @@ def detect_heartbeat():
     pretime_str = time.strftime("%Y-%m-%d %H:%M:%S", pretime)
     if connect == False and timedif < 70 and pretime != lasttime:
         connect = True
-        if lasttime !=():
-            hb_treeview.insert('','end', values=('连接',nowtime_str, pretime_str))
+        if lasttime != ():
+            hb_treeview.insert('', 'end', values=('连接', nowtime_str, pretime_str))
         mh_connect.configure(text='心跳包正常接收中')
         lasttime = pretime
-    elif connect == True and timedif > 62 :
-        hb_treeview.insert('', 'end', values=('断开',nowtime_str, pretime_str))
+    elif connect == True and timedif > 62:
+        hb_treeview.insert('', 'end', values=('断开', nowtime_str, pretime_str))
         connect = False
         lasttime = pretime
         mh_connect.configure(text='连接已断开')
-
 
 
 '''
 传感器参数显示部分，包括下拉菜单机器号选择
 '''
 
-#显示参数部分循环函数
+
+# 判断devicedata是否有变化，每次打开都会新建一个dd文件，所以total_lines可以初始化为0
+def is_change():
+    global total_lines
+    c = []
+    dd_file_list = glob.glob("./{}/log/DeviceData*".format(current_machine))
+    sort_dd = sorted(dd_file_list, key=lambda x: os.path.getmtime(x))  # Sort by time of most recent modification
+    latest_file = sort_dd[-1]
+    with open(latest_file) as f:
+        for line in f:
+            if line.startswith('202'):
+                line = line.rstrip('\n')
+                c.append(line)
+    if len(c) != total_lines:
+        total_lines = len(c)
+        return c[-1]
+    else:
+        return False
+
+
+def write_into_db(item):
+    global sensor_dict
+    pre, mid, rear = item.split("\t")
+    _, time_v = pre.split(" ")
+    rear = rear.split("#")
+    m_v = rear[0]
+    for k in range(1, 131):
+        key = "sensor{}".format(k)
+        sensor_dict.update({key: rear[k]})
+    sensor_v = json.dumps(sensor_dict)
+    cur.execute("insert into {}(time, mid, sensor_info) values(?,?,?)".format(today_sheet), (time_v, m_v, sensor_v))
+
+
+# 显示参数部分循环函数
 def loop():
     get_realtime_data(3)
+    # 判断dd文件是否更新，更新则修改数据库内容
+    last_line_c = is_change()
+    if last_line_c:
+        write_into_db(last_line_c)
     update_contents()
     update_cmblist()
     root.after(10000, loop)
+
 
 def get_realtime_data(num):  # 读取最近的num个文件的数据并更新全局字典
     global file_num, contents_list, directory_address
@@ -138,6 +184,7 @@ def get_realtime_data(num):  # 读取最近的num个文件的数据并更新全�
     sort_dd = sorted(dd_file_list, key=lambda x: os.path.getmtime(x))  # Sort by time of most recent modification
     latest_dd_path = sort_dd[-num:]  # list member: path
     get_latest_lines(latest_dd_path)
+
 
 def get_latest_lines(path_list):
     global contents_list, unit_list
@@ -173,6 +220,7 @@ def get_latest_lines(path_list):
         except EXCEPTION:
             print("read file error\n")
 
+
 def get_point(arr):
     '''
     字符串中第一个不是数字的字符的位置
@@ -183,7 +231,8 @@ def get_point(arr):
         if chars in number_list:
             cou += 1
         else:
-            return cou-1
+            return cou - 1
+
 
 def update_contents():  # 更新参数
     global contents, contents_list, machine_ID, unit_list, unit_con
@@ -191,12 +240,12 @@ def update_contents():  # 更新参数
     unit_con = unit_list[machine_ID]
     change_show()
 
+
 def update_cmblist():  # 更新下拉菜单机器号
     cmb_value = []
     for ckey in sorted(contents_list):
         cmb_value.append(ckey)
     cmb['value'] = cmb_value
-
 
 
 def choose_machine(event):  # 下拉菜单事件绑定
@@ -224,6 +273,8 @@ def change_show():
 '''
 实时时间显示
 '''
+
+
 def gettime():
     # 获取当前时间并转为字符串
     timestr = time.strftime("%H:%M:%S")
@@ -236,6 +287,7 @@ def gettime():
 '''
 报警部分
 '''
+
 
 def alarm_loop():
     print(u'当前进程的内存使用：%.4f GB' % (psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024 / 1024))
@@ -340,13 +392,29 @@ def alarm_logic():
 '''
 主体框架
 '''
+# 连接数据库，没有则创建
+conn = sqlite3.connect("machine_info.db")
+cur = conn.cursor()
+# 创建当天对应的数据表，已经有了则忽视
+today_sheet = "machine_info" + str(datetime.date.today())
+cur.execute(
+    "CREATE TABLE IF NOT EXISTS {}(time TEXT PRIMARY KEY NOT NULL,mid TEXT,sensor_info TEXT)".format(today_sheet))
+
+# 添加记录报警的数据库
+con_alarm = sqlite3.connect("machine_alarm.db")
+cur_a = con_alarm.cursor()
+# 创建当天对应的数据表，已经有了则忽视
+today_ala_sheet = "machine_alarm" + str(datetime.date.today())
+cur_a.execute(
+    "CREATE TABLE IF NOT EXISTS {}(hour TEXT, min TEXT, sec TEXT, mid TEXT,sid TEXT, atype TEXT, strength TEXT, a_v, TEXT)".format(
+        today_ala_sheet))
 
 # topFrame
 topFrame = Frame(root, bg="orange", relief=SUNKEN)
 topFrame.place(x=0, y=0, width=1100, height=60)
 
 # topFrame在root中，topFrame中有 请在下方选择机器号,实时数据,实时时间
-#选择文件夹及路径显示
+# 选择文件夹及路径显示
 label_choosefile = Label(topFrame, text='目标路径')
 label_choosefile.place(x=5, y=10)
 entry_choosefile = Entry(topFrame, textvariable=directory_address_show, state="readonly")
@@ -362,7 +430,6 @@ label.place(x=800, y=10)
 lb = Label(topFrame, text='', fg='blue', font=("黑体", 20))
 lb.place(x=950, y=12)
 gettime()
-
 
 # bottomFrame
 bottomFrame = Frame(root, bg="blue")
@@ -473,7 +540,6 @@ page_note.add(m13, text="页面3")
 page_note.add(m14, text="页面4")
 page_note.grid(row=0, column=1, padx=2)
 
-
 # ma 中显示报警记录
 ma_subTopF = Frame(ma, relief=SUNKEN)  # 宽度， 边框样式
 ma_subTopF.place(x=0, y=0, width=1100, height=50)
@@ -531,7 +597,7 @@ for mm in range(1, 10):
 
 page_note.grid(row=0, column=1, padx=2)
 
-#断网报警页
+# 断网报警页
 mh = tkinter.Frame()
 major_note.add(mh, text="断网报警")
 
@@ -543,7 +609,6 @@ mh_label = tkinter.Label(mh_subTopF, text='心跳断连报警记录', bg='lightb
 mh_label.place(x=200, y=5)
 mh_connect = tkinter.Label(mh_subTopF, text='连接断开中', fg='green', font=("Arial Bold", 20))
 mh_connect.place(x=700, y=5)
-
 
 columns = ("类型", "发生时间", "最近心跳时间")
 hb_treeview = ttk.Treeview(mh_subBotF, height=18, show="headings", columns=columns)  # 表格
@@ -559,10 +624,5 @@ hb_treeview.heading("最近心跳时间", text="最近心跳时间")
 hb_treeview.pack(fill=BOTH)
 
 heart_loop()
-
-
-
-
-
 
 mainloop()
